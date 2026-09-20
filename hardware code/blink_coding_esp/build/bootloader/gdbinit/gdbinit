@@ -1,0 +1,2 @@
+source /Users/dakshjindal/EmbeddedCode/blink_coding_esp/build/bootloader/gdbinit/symbols
+source /Users/dakshjindal/EmbeddedCode/blink_coding_esp/build/bootloader/gdbinit/connect
