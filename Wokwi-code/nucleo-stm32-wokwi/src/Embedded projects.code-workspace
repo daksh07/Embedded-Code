@@ -3,6 +3,12 @@
 		{
 			"name": "nucleo-stm32-wokwi",
 			"path": ".."
+		},
+		{
+			"path": "../../../../.platformio/packages/framework-stm32cubec0/Drivers/STM32C0xx_HAL_Driver"
+		},
+		{
+			"path": "../../../../.platformio/packages/framework-stm32cubec0/Drivers/CMSIS/Device/ST/STM32C0xx"
 		}
 	],
 	"settings": {

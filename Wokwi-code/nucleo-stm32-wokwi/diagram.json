@@ -9,10 +9,36 @@
       "top": 0,
       "left": 0,
       "attrs": {}
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btn1",
+      "top": 300,
+      "left": 350,
+      "attrs": { "color": "blue" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led2",
+      "top": 250,
+      "left": 400,
+      "attrs": { "color": "yellow" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r1",
+      "top": 250,
+      "left": 440,
+      "attrs": { "value": "220" }
     }
   ],
   "connections": [
     [ "$serialMonitor:TX", "nucleo:PA3", "", [] ],
-    [ "$serialMonitor:RX", "nucleo:PA2", "", [] ]
+    [ "$serialMonitor:RX", "nucleo:PA2", "", [] ],
+    [ "btn1:1.l", "nucleo:PC13", "magenta", [ "h0" ] ],
+    [ "btn1:2.r", "nucleo:GND.1", "gray", [ "h0" ] ],
+    [ "nucleo:PA6", "led2:A", "yellow", [ "h0" ] ],
+    [ "led2:C", "r1:1", "yellow", [ "h0" ] ],
+    [ "r1:2", "nucleo:GND.2", "black", [ "h0" ] ]
   ]
 }
