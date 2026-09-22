@@ -13,7 +13,8 @@ Then we write the ISR EXTI4_15_IRQHandler() which we found in the startup .s fil
 this ISR then calls the interrupt handler HAL_GPIO_EXTI_IRQHandler that clear the interrupt flag
 and this handler then calls the falling_edge callback function
 In the falling edge callback we capture the state change and current time
-Now the debounce logic needs to be fixed and main updated accordingly
+With the debounce logic checking the difference between the new press time stamp and the old registered press time stamp
+if the differece is less that 500 ms the button press is ignored as it is due to noise
 */
 
 #include "stm32c031xx.h"
@@ -169,7 +170,7 @@ void HAL_GPIO_EXTI_Falling_Callback(uint16_t GPIO_Pin){
 }
 
 bool btn_pressed(){
-  if (tick - last_tick > 200){
+  if (tick - last_tick > 500){
     if (btn_press == true){
       btn_press = false;
       last_tick = tick;
