@@ -30,6 +30,13 @@
       "top": 250,
       "left": 440,
       "attrs": { "value": "220" }
+    },
+    {
+      "type": "wokwi-lcd2004",
+      "id": "lcd1",
+      "top": 50,
+      "left": 400,
+      "attrs": { "pins": "i2c" }
     }
   ],
   "connections": [
@@ -39,6 +46,10 @@
     [ "btn1:2.r", "nucleo:GND.1", "gray", [ "h0" ] ],
     [ "nucleo:PA6", "led2:A", "yellow", [ "h0" ] ],
     [ "led2:C", "r1:1", "yellow", [ "h0" ] ],
-    [ "r1:2", "nucleo:GND.2", "black", [ "h0" ] ]
+    [ "r1:2", "nucleo:GND.2", "black", [ "h0" ] ],
+    [ "lcd1:SCL", "nucleo:PA9", "green", [ "h0" ] ],
+    [ "lcd1:SDA", "nucleo:PA10", "orange", [ "h0" ] ],
+    [ "lcd1:VCC", "nucleo:5V.1", "red", [ "h0" ] ],
+    [ "lcd1:GND", "nucleo:GND.3", "black", [ "h0" ] ]
   ]
 }

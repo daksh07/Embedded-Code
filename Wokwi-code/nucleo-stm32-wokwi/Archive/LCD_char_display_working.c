@@ -3,18 +3,11 @@ We configure the RCC to internal high speed clock (HSI) 48MHz along with Flash l
 to match that speed else flash access will be slower and fill memory with junk
 First we setup the oscillator
 Then we setup all the clocks
-Then we setup the IO and UART in init functions calling their init structs using their handles
-gpio PC13 is setup for falling edge interrupt as the external button ground the input when pressed
-hence falling edge means button pressed, 
-we also use the internal pull up setting to keep the idle state of PC13 high
-Then we set the interrupt by setting NVIC priority for specific interrupt handler
-And then we enable the interrupt using NVIC_Enable
-Then we write the ISR EXTI4_15_IRQHandler() which we found in the startup .s file
-this ISR then calls the interrupt handler HAL_GPIO_EXTI_IRQHandler that clear the interrupt flag
-and this handler then calls the falling_edge callback function
-In the falling edge callback we capture the state change and current time
-With the debounce logic checking the difference between the new press time stamp and the old registered press time stamp
-if the differece is less that 500 ms the button press is ignored as it is due to noise
+Then we setup the I2C GPIO in I2C_MspInit
+The I2C itself is setup in MX_I2C1_Init
+Then we build the function send_data to send 4 bits long data along
+Another send_char function that converts a char into sendable data
+Finally LCD_Init to initliase the LCD to receive 4 bits data and turn on properly
 */
 
 #include "Legacy/stm32_hal_legacy.h"
@@ -66,11 +59,9 @@ int main(void)
     MX_I2C1_Init();
     LCD_init();
     char a = 'A';
-    char b = ' ';
-    char c = 'B';
+    char b = 'B';
     send_data(a);
     send_data(b);
-    send_data(c);
     while (1)
     {
         HAL_UART_Transmit(&huart2, (uint8_t *)"Test output\n", strlen("Test output\n"), HAL_MAX_DELAY);
@@ -202,60 +193,112 @@ void HAL_I2C_MspInit(I2C_HandleTypeDef* i2cHandle)
 
 }
 
+/*
+ * LCD_init
+ * The first four send_nibble() calls are special: the display doesn't yet
+ * know it's in 4-bit mode, so these go as standalone nibbles, not pairs.
+ * This exact sequence (0x3 x3, then 0x2) resets the controller reliably
+ * regardless of its power-on state. RS=0 throughout — these are all commands.
+ * Intialisation sequence on page 45 in datasheet
+ */
 static void LCD_init(void)
 {
-  HAL_Delay(45);
+  HAL_Delay(45);          // Wait >40ms after power-on
+
   send_nibble(0x3, 0);
-  HAL_Delay(5);
+  HAL_Delay(5);           // >4.1ms
+
   send_nibble(0x3, 0);
-  HAL_Delay(1);
+  HAL_Delay(1);           // >100us
+
   send_nibble(0x3, 0);
-  send_nibble(0x2, 0);
+
+  send_nibble(0x2, 0);    // Switches into 4-bit mode. From here on, every
+                           // write is a proper high/low nibble pair.
+
+  // Function Set: 0x28 = 4-bit, 2-line, 5x8 font
   send_nibble(0x2, 0);
   send_nibble(0x8, 0);
+
+  // Display Off: 0x08 (must be off before Display Clear)
   send_nibble(0x0, 0);
   send_nibble(0x8, 0);
+
+  // Display Clear: 0x01
   send_nibble(0x0, 0);
   send_nibble(0x1, 0);
-  HAL_Delay(2);
+  HAL_Delay(2);            // Slow op — needs >1.6ms
+
+  // Entry Mode Set: 0x06 = auto-increment cursor, no shift
   send_nibble(0x0, 0);
   send_nibble(0x6, 0);
+
+  // Display On: 0x0C = display on, cursor/blink off
   send_nibble(0x0, 0);
   send_nibble(0xC, 0);
 }
 
+/*
+ * send_data
+ * Sends one ASCII character to the data register (RS=1). A char is
+ * already a small int in C, so no conversion — just split into nibbles.
+ * Returns true only if both nibble sends succeed.
+ */
 bool send_data(char a)
 {
-  uint8_t nibble[2] = {(a & 0xF0)>>4, a};
+  // High nibble: mask + shift down to bits 0-3 (send_nibble shifts up itself).
+  // Low nibble: already sitting in bits 0-3 — no masking needed.
+  uint8_t nibble[2] = {(a & 0xF0) >> 4, a};
+
   uint8_t RS = 1;
   uint8_t count = 0;
-  for (uint8_t i = 0; i < 2; i ++){
-    if (send_nibble(nibble[i], RS)){
+
+  for (uint8_t i = 0; i < 2; i++)
+  {
+    if (send_nibble(nibble[i], RS))
+    {
       count++;
     }
   }
-  if (count == 2){
+
+  if (count == 2)
+  {
     return true;
   }
   return false;
 }
 
+/*
+ * send_nibble
+ * PCF8574->HD44780 mapping: bit0=RS, bit1=R/W(always 0), bit2=E, bit3=Backlight,
+ * bits4-7=data nibble. HD44780 latches on E's falling edge, so one nibble
+ * is two transmissions of the same byte with E flipped 1->0 between them.
+ * 'nibble' is expected unshifted (bits 0-3); this function shifts it into place.
+ */
 bool send_nibble(uint8_t nibble, uint8_t RS)
 {
   nibble = nibble << 4;
+
   uint8_t lowerbits[2] = {0};
-  if (RS == 1){
-    lowerbits[0] = 0b1101;
-    lowerbits[1] = 0b1001;
+  if (RS == 1)
+  {
+    lowerbits[0] = 0b1101;   // RS=1, E=1, Backlight=1
+    lowerbits[1] = 0b1001;   // RS=1, E=0, Backlight=1
   }
-  else{
-    lowerbits[0] = 0b1100;
-    lowerbits[1] = 0b1000;
+  else
+  {
+    lowerbits[0] = 0b1100;   // RS=0, E=1, Backlight=1
+    lowerbits[1] = 0b1000;   // RS=0, E=0, Backlight=1
   }
+
   uint8_t data_send[2] = {nibble | lowerbits[0], nibble | lowerbits[1]};
+
   bool ok1 = (HAL_I2C_Master_Transmit(&hi2c, I2C_LCD_ADDR, &data_send[0], 1, HAL_MAX_DELAY) == HAL_OK);
-  HAL_Delay(1);  // only here — the gap between E=1 and E=0
+
+  HAL_Delay(1);   // Hold between E=1 and E=0 — overkill but simple for now
+
   bool ok2 = (HAL_I2C_Master_Transmit(&hi2c, I2C_LCD_ADDR, &data_send[1], 1, HAL_MAX_DELAY) == HAL_OK);
+
   return ok1 && ok2;
 }
 
