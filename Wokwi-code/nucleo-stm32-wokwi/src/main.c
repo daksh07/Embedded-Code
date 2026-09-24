@@ -1,20 +1,8 @@
 /* Summary
-We configure the RCC to internal high speed clock (HSI) 48MHz along with Flash latency 
-to match that speed else flash access will be slower and fill memory with junk
-First we setup the oscillator
-Then we setup all the clocks
-Then we setup the IO and UART in init functions calling their init structs using their handles
-gpio PC13 is setup for falling edge interrupt as the external button ground the input when pressed
-hence falling edge means button pressed, 
-we also use the internal pull up setting to keep the idle state of PC13 high
-Then we set the interrupt by setting NVIC priority for specific interrupt handler
-And then we enable the interrupt using NVIC_Enable
-Then we write the ISR EXTI4_15_IRQHandler() which we found in the startup .s file
-this ISR then calls the interrupt handler HAL_GPIO_EXTI_IRQHandler that clear the interrupt flag
-and this handler then calls the falling_edge callback function
-In the falling edge callback we capture the state change and current time
-With the debounce logic checking the difference between the new press time stamp and the old registered press time stamp
-if the differece is less that 500 ms the button press is ignored as it is due to noise
+In this program I simple ask the user to press the button on the lcd
+the lcd then displays the button count
+the lcd library was updated for finer cursor control
+the lcd cursor now can be placed anywhere according to the need
 */
 
 #include "Legacy/stm32_hal_legacy.h"
@@ -28,29 +16,25 @@ if the differece is less that 500 ms the button press is ignored as it is due to
 #include "stm32c0xx_hal_rcc.h"
 #include "stm32c0xx_hal_uart.h"
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
 #include <sys/_intsup.h>
+#include "lcd_i2c.h"
 
 #define I2C_LCD_ADDR 0x27<<1
 UART_HandleTypeDef huart2;
 I2C_HandleTypeDef hi2c;
+LCD_HandleTypeDef hlcd;
 volatile bool btn_press = false;
 static uint32_t last_tick = 0;
 static uint32_t tick = 0;
-uint8_t char_A[] = {0b01001101, 0b01001001,0b00011101, 0b00011001};
 
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_I2C1_Init(void);
-static void LCD_init(void);
 void Error_Handler(void);
-void HAL_GPIO_EXTI_Rising_Callback(uint16_t GPIO_Pin);
-void EXTI4_15_IRQHandler(void);
-bool btn_pressed(void);
-bool send_data(char a);
-bool send_nibble(uint8_t nibble, uint8_t RS);
 
 void SysTick_Handler(void)
 {
@@ -64,21 +48,12 @@ int main(void)
     MX_GPIO_Init();
     MX_USART2_UART_Init();
     MX_I2C1_Init();
-    LCD_init();
-    char a = 'A';
-    char b = ' ';
-    char c = 'B';
-    send_data(a);
-    send_data(b);
-    send_data(c);
+    hlcd.i2c_handle = &hi2c;
+    LCD_init(&hlcd);
+
     while (1)
-    {
-        HAL_UART_Transmit(&huart2, (uint8_t *)"Test output\n", strlen("Test output\n"), HAL_MAX_DELAY);
-        HAL_Delay(1000);
-        if (btn_pressed()){
-          HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
-          HAL_UART_Transmit(&huart2, (uint8_t *)"Button Pressed\n", strlen("Button Pressed\n"), HAL_MAX_DELAY);
-        }
+    { 
+
     }
 }
 
@@ -114,28 +89,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOC_CLK_ENABLE();
 
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
-
-  GPIO_InitStruct.Pin = GPIO_PIN_5;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  GPIO_InitStruct.Pin = GPIO_PIN_6;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  GPIO_InitStruct.Pin = GPIO_PIN_13;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-
-  HAL_NVIC_SetPriority(EXTI4_15_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI4_15_IRQn);
 }
 
 static void MX_USART2_UART_Init(void)
@@ -202,87 +156,8 @@ void HAL_I2C_MspInit(I2C_HandleTypeDef* i2cHandle)
 
 }
 
-static void LCD_init(void)
-{
-  HAL_Delay(45);
-  send_nibble(0x3, 0);
-  HAL_Delay(5);
-  send_nibble(0x3, 0);
-  HAL_Delay(1);
-  send_nibble(0x3, 0);
-  send_nibble(0x2, 0);
-  send_nibble(0x2, 0);
-  send_nibble(0x8, 0);
-  send_nibble(0x0, 0);
-  send_nibble(0x8, 0);
-  send_nibble(0x0, 0);
-  send_nibble(0x1, 0);
-  HAL_Delay(2);
-  send_nibble(0x0, 0);
-  send_nibble(0x6, 0);
-  send_nibble(0x0, 0);
-  send_nibble(0xC, 0);
-}
-
-bool send_data(char a)
-{
-  uint8_t nibble[2] = {(a & 0xF0)>>4, a};
-  uint8_t RS = 1;
-  uint8_t count = 0;
-  for (uint8_t i = 0; i < 2; i ++){
-    if (send_nibble(nibble[i], RS)){
-      count++;
-    }
-  }
-  if (count == 2){
-    return true;
-  }
-  return false;
-}
-
-bool send_nibble(uint8_t nibble, uint8_t RS)
-{
-  nibble = nibble << 4;
-  uint8_t lowerbits[2] = {0};
-  if (RS == 1){
-    lowerbits[0] = 0b1101;
-    lowerbits[1] = 0b1001;
-  }
-  else{
-    lowerbits[0] = 0b1100;
-    lowerbits[1] = 0b1000;
-  }
-  uint8_t data_send[2] = {nibble | lowerbits[0], nibble | lowerbits[1]};
-  bool ok1 = (HAL_I2C_Master_Transmit(&hi2c, I2C_LCD_ADDR, &data_send[0], 1, HAL_MAX_DELAY) == HAL_OK);
-  HAL_Delay(1);  // only here — the gap between E=1 and E=0
-  bool ok2 = (HAL_I2C_Master_Transmit(&hi2c, I2C_LCD_ADDR, &data_send[1], 1, HAL_MAX_DELAY) == HAL_OK);
-  return ok1 && ok2;
-}
-
 void Error_Handler(void)
 {
   __disable_irq();
   while (1) {}
-}
-
-void EXTI4_15_IRQHandler(){
-  HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_13);
-}
-
-void HAL_GPIO_EXTI_Falling_Callback(uint16_t GPIO_Pin){
-  btn_press = true;
-  tick = HAL_GetTick();
-  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_6);
-}
-
-bool btn_pressed(){
-  if (tick - last_tick > 500){
-    if (btn_press == true){
-      btn_press = false;
-      last_tick = tick;
-      return true;
-    }
-  }
-  btn_press = false;
-  return false;
 }
